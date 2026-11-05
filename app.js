@@ -10,7 +10,7 @@
    * API 키는 서버(Vercel 환경변수 OPENAI_API_KEY)에만 있어요. 이 파일에는 절대 넣지 마세요.
    * AI가 실패하거나, 늦거나, 사용 횟수를 넘으면 data.js의 예시 데이터로 자연스럽게 넘어가요.
    * ========================================================= */
-  const AI_TIMEOUT = { interpret: 15000, meeting: 25000 }; // 이 시간 안에 답이 없으면 예시 데이터로
+  const AI_TIMEOUT = { interpret: 28000, meeting: 28000, report: 28000 }; // 서버(25초)보다 조금 길게 기다린 뒤, 답이 없으면 예시 데이터로
   const DAILY_LIMIT = 20; // 브라우저 하나당 하루 AI 호출 수
 
   // 브라우저별 하루 사용 횟수 (저장이 막힌 브라우저에서는 이번 방문 동안만 세요)
@@ -58,7 +58,7 @@
     async ready() {
       return this.online === null ? this.check() : this.online;
     },
-    async post(path, plan, ms) {
+    async post(path, plan, ms, extra = {}) {
       if (!quota.take()) throw new Error('LIMIT');
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), ms);
@@ -66,12 +66,12 @@
         const r = await fetch(path, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ plan: planForAI(plan) }),
+          body: JSON.stringify({ plan: planForAI(plan), ...extra }),
           signal: ctrl.signal,
         });
-        if (r.status === 429) throw new Error('LIMIT');
         const j = await r.json().catch(() => ({}));
-        if (!r.ok || !j.ok) throw new Error('FAIL');
+        if (r.status === 429) throw new Error('LIMIT');
+        if (!r.ok || !j.ok) throw new Error(String(j.reason || `HTTP_${r.status}`).slice(0, 20));
         return j.data;
       } catch (e) {
         throw new Error(e && e.name === 'AbortError' ? 'TIMEOUT' : (e && e.message) || 'FAIL');
@@ -90,6 +90,15 @@
         return { meeting: mergeMeeting(await this.post('/api/meeting', plan, AI_TIMEOUT.meeting)), source: 'ai' };
       } catch (e) {
         return { meeting: D.meeting, source: 'fallback', reason: e.message };
+      }
+    },
+    // 결과: 기획서와 회의에서 고른 답을 읽고 진로 체험 리포트를 써요 → 실패하면 예시 리포트
+    async getReport(plan, choices) {
+      if (!(await this.ready())) return { report: null, source: 'example' };
+      try {
+        return { report: await this.post('/api/report', plan, AI_TIMEOUT.report, { choices }), source: 'ai' };
+      } catch (e) {
+        return { report: null, source: 'fallback', reason: e.message };
       }
     },
     // 미리보기: AI 개발자가 버튼 동작 문장을 읽고 연결할 화면을 정해요 → 실패하면 기본 규칙
@@ -161,10 +170,16 @@
 
   // AI 결과를 어디서 가져왔는지 쉬운 말로
   function aiNote(kind, source, reason) {
+    if (kind === 'report') {
+      if (source === 'ai') return 'AI가 내 기획서와 회의에서 고른 답을 읽고 쓴 리포트예요.';
+      if (source === 'example') return 'AI 서버에 연결되지 않아, 내가 고른 답을 바탕으로 만든 예시 리포트예요.';
+    }
     if (source === 'ai') return kind === 'interpret' ? 'AI 개발자 코디가 기획서 문장을 읽고 버튼을 연결했어요.' : 'AI 팀원이 내 기획서를 읽고 쓴 질문이에요.';
     if (source === 'example') return kind === 'interpret' ? 'AI 서버에 연결되지 않아 기본 규칙으로 버튼을 연결했어요.' : 'AI 서버에 연결되지 않아 예시 질문을 보여 드려요.';
     const why = reason === 'LIMIT' ? 'AI 사용 횟수를 다 써서' : reason === 'TIMEOUT' ? 'AI 응답이 늦어서' : 'AI 응답을 받지 못해서';
-    return kind === 'interpret' ? `${why} 기본 규칙으로 버튼을 연결했어요.` : `${why} 예시 질문을 보여 드려요.`;
+    const code = reason && reason !== 'LIMIT' ? ` (원인 코드: ${reason})` : '';
+    if (kind === 'report') return `${why} 내가 고른 답을 바탕으로 만든 예시 리포트를 보여 드려요.${code}`;
+    return kind === 'interpret' ? `${why} 기본 규칙으로 버튼을 연결했어요.${code}` : `${why} 예시 질문을 보여 드려요.${code}`;
   }
 
   /* ---------- 작은 도우미 ---------- */
@@ -1292,6 +1307,94 @@
     return lines.join('\n');
   }
 
+  /* ---------- 진로 체험 리포트 ---------- */
+  // 회의에서 고른 답을 AI·예시 리포트가 읽을 수 있게 정리
+  function reportChoices() {
+    return MEET().questions.map((q) => {
+      const o = findOpt(q, state.answers[q.id]);
+      return { gap: q.gapTitle, question: q.short, choice: o.label, planText: fill(o.planText), memo: state.memos[q.id] || '' };
+    });
+  }
+
+  // AI가 실패했을 때: 학생의 선택만으로 만드는 예시 리포트
+  function exampleReport() {
+    const R = D.report;
+    const picks = MEET().questions.map((q) => {
+      const o = findOpt(q, state.answers[q.id]);
+      return { q, o, sig: R.signals[q.id][o.id], memo: state.memos[q.id] || '' };
+    });
+    const score = Object.fromEntries(R.roles.map((r) => [r, 0]));
+    picks.forEach((p) => (score[p.sig.role] += 1));
+    const order = [...R.roles].sort((a, b) => score[b] - score[a]);
+    const ev = (p) => `“${p.q.short}” → “${p.o.label}”${p.memo ? ` · 덧붙인 생각 “${p.memo}”` : ''}`;
+    const focuses = [...new Set(picks.map((p) => p.sig.focus))];
+    return {
+      focus: {
+        summary: `이번 체험에서는 ${focuses.slice(0, 2).join(', 그리고 ')}에 관심을 보였어요.`,
+        items: picks.map((p) => ({ point: `${p.sig.focus}을(를) 살폈어요.`, evidence: ev(p) })),
+      },
+      closest: order[0],
+      roles: R.roles.map((role) => {
+        const mine = picks.filter((p) => p.sig.role === role);
+        return { role, note: mine.length ? R.roleNotes[role].seen : R.roleNotes[role].unseen, evidence: mine.length ? mine.map(ev).join(' / ') : '이번 선택에서는 뚜렷한 근거가 없었어요' };
+      }),
+      tasks: [
+        { ...R.tasks[order[0]][0], role: order[0] },
+        { ...R.tasks[order[0]][1], role: order[0] },
+        { ...R.tasks[order[1]][0], role: order[1] },
+      ],
+    };
+  }
+
+  function reportHtml(r, note) {
+    return `
+      <section class="rp-block">
+        <h4>이번 체험에서 자주 살핀 것</h4>
+        <p class="rp-summary">${esc(r.focus.summary)}</p>
+        <ul class="rp-list">
+          ${r.focus.items.map((x) => `<li><span>${esc(x.point)}</span><small class="rp-ev"><b>근거</b>${esc(x.evidence)}</small></li>`).join('')}
+        </ul>
+      </section>
+      <section class="rp-block">
+        <h4>가까웠던 일</h4>
+        <div class="rp-roles">
+          ${r.roles
+            .map(
+              (x) => `<div class="rp-role ${x.role === r.closest ? 'closest' : ''}">
+                <div class="rp-role-head"><b>${esc(x.role)}</b>${x.role === r.closest ? '<span class="tag">이번 체험에서 가장 가까웠어요</span>' : ''}</div>
+                <p>${esc(x.note)}</p>
+                <small class="rp-ev"><b>근거</b>${esc(x.evidence)}</small>
+              </div>`
+            )
+            .join('')}
+        </div>
+      </section>
+      <section class="rp-block">
+        <h4>다음에 해 볼 작은 과제 3개</h4>
+        <ol class="rp-tasks">
+          ${r.tasks.map((t) => `<li><div class="rp-task-head"><b>${esc(t.title)}</b><span class="tag">${esc(t.role)}</span></div><p>${esc(t.how)}</p></li>`).join('')}
+        </ol>
+      </section>
+      <p class="caption ai-note">${esc(note)}</p>`;
+  }
+
+  // 리포트 불러오기: 로딩 표시 → AI 리포트 → 실패하면 예시 리포트
+  function loadReport(box) {
+    const choices = reportChoices();
+    const key = JSON.stringify({ plan: planForAI(state.plan), choices });
+    if (state.report && state.report.key === key) {
+      box.innerHTML = reportHtml(state.report.data, state.report.note);
+      return;
+    }
+    box.innerHTML = '<div class="rp-loading"><span class="spin" aria-hidden="true"></span>AI가 내 기획서와 선택을 읽고 리포트를 쓰는 중…</div>';
+    AI.getReport(state.plan, choices).then((res) => {
+      const data = res.report || exampleReport();
+      const note = aiNote('report', res.source, res.reason);
+      state.report = { key, data, note };
+      if (box.isConnected) box.innerHTML = reportHtml(data, note);
+    });
+  }
+
   function renderResult() {
     const qs = MEET().questions;
     const clear = homeResolved();
@@ -1318,6 +1421,10 @@
           <div class="compare-arrow" aria-hidden="true">${icon('arrowRight')}</div>
           <figure><figcaption class="tag after">수정 후</figcaption><div id="phoneAfter"></div></figure>
         </div>
+
+        <h3 class="sec-title">진로 체험 리포트</h3>
+        <p class="muted">${esc(D.report.intro)}</p>
+        <div class="card report" id="report" aria-live="polite"></div>
 
         <h3 class="sec-title">발견한 빈틈 3개</h3>
         <div class="gaps">
@@ -1359,6 +1466,7 @@
         </div>
       </section>`);
 
+    loadReport($('#report'));
     new Phone($('#phoneBefore'), { getPlan: () => state.plan, getFixes: () => ({}) });
     new Phone($('#phoneAfter'), { getPlan: () => state.plan, getFixes: () => state.answers });
 
@@ -1381,7 +1489,7 @@
     });
     $('#restart').addEventListener('click', () => {
       if (!confirm('지금까지 쓴 기획서가 지워져요. 처음부터 다시 할까요?')) return;
-      Object.assign(state, { maxStep: 0, plan: blankPlan(), answers: {}, memos: {}, log: [], missions: {}, seenRequest: false, seenMeeting: false, aiActions: null, aiActionsNote: '', meeting: null, meetingNote: '', meetingPromise: null });
+      Object.assign(state, { maxStep: 0, plan: blankPlan(), answers: {}, memos: {}, log: [], missions: {}, seenRequest: false, seenMeeting: false, aiActions: null, aiActionsNote: '', meeting: null, meetingNote: '', meetingPromise: null, report: null });
       goTo(0);
     });
   }

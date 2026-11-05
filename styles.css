@@ -537,12 +537,32 @@ textarea:focus, input:focus { outline: none; border-color: var(--text-2); }
 .spin { width: 16px; height: 16px; flex: none; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ================= 진로 체험 리포트 ================= */
+.report { display: grid; gap: 32px; }
+.rp-block h4 { font-size: var(--t2); line-height: var(--lh2); font-weight: var(--w2); margin-bottom: 16px; }
+.rp-summary { margin-bottom: 16px; color: var(--text); }
+.rp-list, .rp-tasks { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.rp-list li { display: grid; gap: 8px; padding: 16px; border: 1px solid var(--border); border-radius: var(--r-sm); }
+.rp-ev { display: flex; gap: 8px; align-items: baseline; font-size: var(--cap); line-height: var(--lhc); color: var(--text-2); }
+.rp-ev b { flex: none; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); font-weight: var(--w2); color: var(--muted); line-height: 18px; }
+.rp-roles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.rp-role { display: grid; gap: 8px; align-content: start; padding: 16px; border: 1px solid var(--border); border-radius: var(--r); }
+.rp-role.closest { border-color: var(--text-2); background: var(--surface-2); }
+.rp-role-head, .rp-task-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rp-role p, .rp-tasks p { color: var(--text-2); }
+.rp-tasks { counter-reset: task; }
+.rp-tasks li { position: relative; display: grid; gap: 8px; padding: 16px 16px 16px 48px; border: 1px solid var(--border); border-radius: var(--r-sm); counter-increment: task; }
+.rp-tasks li::before { content: counter(task); position: absolute; left: 16px; top: 16px; width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid var(--border-strong); border-radius: 50%; font-family: var(--mono); font-size: var(--cap); color: var(--text-2); }
+.rp-loading { display: flex; align-items: center; gap: 8px; color: var(--text-2); }
+.report .ai-note { margin-top: -16px; text-align: left; }
+
 /* ================= 화면 크기별 ================= */
 @media (max-width: 1080px) {
   .result-hero { grid-template-columns: 1fr; }
   .hero-stats { justify-self: start; }
 }
 @media (max-width: 960px) {
+  .rp-roles { grid-template-columns: 1fr; }
   .bento { grid-template-columns: 1fr 1fr; grid-template-areas: "a a" "b c" "d c" "e e"; }
   .two-col, .plan-layout, .meeting-layout { grid-template-columns: 1fr; }
   .preview-layout, .revise-layout { grid-template-columns: 1fr; gap: 32px; }

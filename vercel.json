@@ -1,6 +1,13 @@
 {
   "functions": {
-    "api/interpret.js": { "maxDuration": 30 },
-    "api/meeting.js": { "maxDuration": 30 }
+    "api/interpret.js": {
+      "maxDuration": 30
+    },
+    "api/meeting.js": {
+      "maxDuration": 30
+    },
+    "api/report.js": {
+      "maxDuration": 30
+    }
   }
 }
