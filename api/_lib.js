@@ -9,7 +9,7 @@
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const MODEL = process.env.OPENAI_MODEL || 'gpt-5-mini';
-const AI_TIMEOUT_MS = 20000; // 20초 안에 답이 없으면 포기 → 화면은 예시 데이터로 넘어감
+const AI_TIMEOUT_MS = 25000; // 25초 안에 답이 없으면 포기 → 화면은 예시 데이터로 넘어감 (vercel.json 최대 30초보다 짧게)
 const MAX_BODY = 8000; // 브라우저에서 받는 요청 크기 제한
 
 /* ---------- 호출 제한 ----------
@@ -78,6 +78,28 @@ function planText(plan) {
 const STR = { type: 'string' };
 const obj = (props) => ({ type: 'object', properties: props, required: Object.keys(props), additionalProperties: false });
 
+/* ---------- OpenAI 오류 기록 ----------
+ * OpenAI 오류 응답의 type, code, message 세 가지만 Vercel 로그에 남겨요.
+ * 키, Authorization 헤더, 요청 본문(학생 입력)은 남기지 않아요.
+ * message 안에 키 일부가 섞여 올 때를 대비해 sk-… 형태는 가려요. */
+const mask = (v, n) =>
+  String(v == null ? '-' : v)
+    .replace(/sk-[A-Za-z0-9_*.-]+/g, '[가림]')
+    .replace(/Bearer\s+\S+/gi, 'Bearer [가림]')
+    .replace(/[\r\n]+/g, ' ')
+    .slice(0, n);
+
+async function logUpstreamError(name, r) {
+  let err = {};
+  try {
+    const j = await r.json();
+    err = (j && j.error) || {};
+  } catch {
+    /* 본문이 JSON이 아니면 상태 코드만 기록 */
+  }
+  console.error(`[${name}] OpenAI 오류 ${r.status} | type=${mask(err.type, 60)} | code=${mask(err.code, 60)} | message=${mask(err.message, 300)}`);
+}
+
 /* ---------- OpenAI 호출 ---------- */
 async function callOpenAI({ name, system, user, schema }) {
   const key = process.env.OPENAI_API_KEY;
@@ -90,7 +112,7 @@ async function callOpenAI({ name, system, user, schema }) {
     ],
     // 정해진 JSON 모양으로만 답하게 해요
     response_format: { type: 'json_schema', json_schema: { name, strict: true, schema } },
-    max_completion_tokens: 4000,
+    max_completion_tokens: 8000, // 추론 모델은 생각하는 데도 한도를 쓰므로 넉넉하게
   };
   if (/^(gpt-5|o\d)/.test(MODEL)) body.reasoning_effort = 'low'; // 추론 모델은 짧게 생각해서 빨리 답하게
 
@@ -103,13 +125,20 @@ async function callOpenAI({ name, system, user, schema }) {
       body: JSON.stringify(body),
       signal: ctrl.signal,
     });
-    if (!r.ok) throw new Error(`UPSTREAM_${r.status}`);
+    if (!r.ok) {
+      await logUpstreamError(name, r);
+      throw new Error(`UPSTREAM_${r.status}`);
+    }
     const data = await r.json();
     const choice = data.choices && data.choices[0];
     if (!choice || !choice.message) throw new Error('EMPTY');
     if (choice.message.refusal) throw new Error('REFUSAL');
     if (choice.finish_reason === 'length') throw new Error('TRUNCATED');
-    return JSON.parse(choice.message.content);
+    try {
+      return JSON.parse(choice.message.content);
+    } catch {
+      throw new Error('BAD_JSON');
+    }
   } finally {
     clearTimeout(timer);
   }
@@ -118,7 +147,7 @@ async function callOpenAI({ name, system, user, schema }) {
 /* ---------- 요청 처리 틀 ---------- */
 function sameOrigin(req) {
   const origin = req.headers.origin;
-  if (!origin) return false;
+  if (!origin) return req.headers['sec-fetch-site'] === 'same-origin'; // Origin을 안 보내는 브라우저 대비
   try {
     return new URL(origin).host === req.headers.host;
   } catch {
@@ -133,8 +162,8 @@ function clientIp(req) {
 function makeHandler({ name, system, schema, buildUser, validate }) {
   return async (req, res) => {
     res.setHeader('cache-control', 'no-store');
-    if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST 요청만 받아요' });
-    if (!sameOrigin(req)) return res.status(403).json({ ok: false, error: '이 사이트에서 보낸 요청만 받아요' });
+    if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST 요청만 받아요', reason: 'METHOD' });
+    if (!sameOrigin(req)) return res.status(403).json({ ok: false, error: '이 사이트에서 보낸 요청만 받아요', reason: 'ORIGIN' });
 
     let payload;
     try {
@@ -149,7 +178,7 @@ function makeHandler({ name, system, schema, buildUser, validate }) {
     if (cache.has(cacheKey)) return res.status(200).json({ ok: true, data: cache.get(cacheKey), cached: true });
 
     if (rateLimited(clientIp(req))) {
-      return res.status(429).json({ ok: false, error: '잠시 후 다시 시도해 주세요' });
+      return res.status(429).json({ ok: false, error: '잠시 후 다시 시도해 주세요', reason: 'RATE_LIMIT' });
     }
 
     try {
@@ -158,9 +187,11 @@ function makeHandler({ name, system, schema, buildUser, validate }) {
       return res.status(200).json({ ok: true, data });
     } catch (e) {
       // 키나 요청 내용은 남기지 않고, 실패 종류만 기록해요
-      const kind = e && e.name === 'AbortError' ? 'TIMEOUT' : String((e && e.message) || 'ERROR').slice(0, 40);
+      const msg = String((e && e.message) || '');
+      const kind = e && e.name === 'AbortError' ? 'TIMEOUT' : /^(NO_KEY|UPSTREAM_\d{3}|EMPTY|REFUSAL|TRUNCATED|BAD_JSON|BAD_SHAPE)$/.test(msg) ? msg : 'ERROR';
       console.error(`[${name}] AI 호출 실패: ${kind}`);
-      return res.status(502).json({ ok: false, error: 'AI 응답을 받지 못했어요' });
+      // 실패 종류 코드만 돌려줘요 (키·요청 내용·OpenAI 원문 오류는 돌려주지 않음)
+      return res.status(502).json({ ok: false, error: 'AI 응답을 받지 못했어요', reason: kind });
     }
   };
 }
