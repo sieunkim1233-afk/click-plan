@@ -1,0 +1,168 @@
+/*
+ * 눌러보는 기획서 — Vercel 서버 함수 공통 코드
+ * ------------------------------------------------------------
+ * - 브라우저는 OpenAI를 직접 부르지 않고 /api/* 만 부릅니다.
+ * - API 키는 Vercel 환경변수 OPENAI_API_KEY 에서만 읽습니다. (코드·로그·응답에 절대 남기지 않음)
+ * - AI는 HTML이 아니라 정해진 JSON만 돌려주고, 서버가 한 번 더 검사합니다.
+ * - 파일 이름이 _ 로 시작하면 Vercel이 주소(함수)로 만들지 않습니다.
+ */
+
+const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
+const MODEL = process.env.OPENAI_MODEL || 'gpt-5-mini';
+const AI_TIMEOUT_MS = 20000; // 20초 안에 답이 없으면 포기 → 화면은 예시 데이터로 넘어감
+const MAX_BODY = 8000; // 브라우저에서 받는 요청 크기 제한
+
+/* ---------- 호출 제한 ----------
+ * 서버 인스턴스 메모리 기준의 간단한 제한이에요(인스턴스가 여러 개면 각자 셉니다).
+ * 더 확실하게 막으려면 Vercel Firewall의 Rate Limiting 규칙도 함께 켜 주세요. */
+const LIMIT = { perIpMinute: 5, perIpHour: 30, globalMinute: 60 };
+const ipHits = new Map();
+let globalHits = [];
+
+function rateLimited(ip) {
+  const now = Date.now();
+  globalHits = globalHits.filter((t) => now - t < 60_000);
+  const mine = (ipHits.get(ip) || []).filter((t) => now - t < 3_600_000);
+  const lastMinute = mine.filter((t) => now - t < 60_000).length;
+  if (globalHits.length >= LIMIT.globalMinute || lastMinute >= LIMIT.perIpMinute || mine.length >= LIMIT.perIpHour) {
+    ipHits.set(ip, mine);
+    return true;
+  }
+  mine.push(now);
+  globalHits.push(now);
+  ipHits.set(ip, mine);
+  if (ipHits.size > 5000) ipHits.clear(); // 메모리 보호
+  return false;
+}
+
+/* ---------- 같은 기획서는 다시 묻지 않기 ---------- */
+const cache = new Map();
+function remember(key, value) {
+  if (cache.size > 200) cache.delete(cache.keys().next().value);
+  cache.set(key, value);
+}
+
+/* ---------- 입력 정리 ---------- */
+const DEFAULT_NAMES = ['홈', '공연 일정', '부스 지도'];
+const clip = (v, n = 300) => String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, n);
+
+function cleanPlan(p) {
+  const plan = p && typeof p === 'object' ? p : {};
+  const names = [0, 1, 2].map((i) => clip(Array.isArray(plan.screenNames) ? plan.screenNames[i] : '', 20) || DEFAULT_NAMES[i]);
+  const screens = [0, 1, 2].map((i) => ({ desc: clip(Array.isArray(plan.screens) && plan.screens[i] ? plan.screens[i].desc : '', 120) }));
+  const a = plan.actions && typeof plan.actions === 'object' ? plan.actions : {};
+  return {
+    purpose: clip(plan.purpose),
+    target: clip(plan.target),
+    screenNames: names,
+    screens,
+    actions: { home: clip(a.home), schedule: clip(a.schedule), map: clip(a.map) },
+  };
+}
+
+function planText(plan) {
+  const n = plan.screenNames;
+  return [
+    `서비스 목적: ${plan.purpose || '(비어 있음)'}`,
+    `대상 사용자: ${plan.target || '(비어 있음)'}`,
+    '주요 화면:',
+    ...n.map((name, i) => `  ${i + 1}. ${name} — ${plan.screens[i].desc || '(설명 없음)'}`),
+    '버튼 동작:',
+    `  - ${n[0]} 화면의 '오늘의 공연 보기' 버튼: ${plan.actions.home || '(비어 있음)'}`,
+    `  - ${n[1]} 화면의 공연 카드: ${plan.actions.schedule || '(비어 있음)'}`,
+    `  - ${n[2]} 화면의 부스 표시(핀): ${plan.actions.map || '(비어 있음)'}`,
+  ].join('\n');
+}
+
+/* ---------- JSON 모양 정의 도우미 ---------- */
+const STR = { type: 'string' };
+const obj = (props) => ({ type: 'object', properties: props, required: Object.keys(props), additionalProperties: false });
+
+/* ---------- OpenAI 호출 ---------- */
+async function callOpenAI({ name, system, user, schema }) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error('NO_KEY');
+  const body = {
+    model: MODEL,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    // 정해진 JSON 모양으로만 답하게 해요
+    response_format: { type: 'json_schema', json_schema: { name, strict: true, schema } },
+    max_completion_tokens: 4000,
+  };
+  if (/^(gpt-5|o\d)/.test(MODEL)) body.reasoning_effort = 'low'; // 추론 모델은 짧게 생각해서 빨리 답하게
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), AI_TIMEOUT_MS);
+  try {
+    const r = await fetch(OPENAI_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    if (!r.ok) throw new Error(`UPSTREAM_${r.status}`);
+    const data = await r.json();
+    const choice = data.choices && data.choices[0];
+    if (!choice || !choice.message) throw new Error('EMPTY');
+    if (choice.message.refusal) throw new Error('REFUSAL');
+    if (choice.finish_reason === 'length') throw new Error('TRUNCATED');
+    return JSON.parse(choice.message.content);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* ---------- 요청 처리 틀 ---------- */
+function sameOrigin(req) {
+  const origin = req.headers.origin;
+  if (!origin) return false;
+  try {
+    return new URL(origin).host === req.headers.host;
+  } catch {
+    return false;
+  }
+}
+
+function clientIp(req) {
+  return String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || String(req.headers['x-real-ip'] || '') || 'unknown';
+}
+
+function makeHandler({ name, system, schema, buildUser, validate }) {
+  return async (req, res) => {
+    res.setHeader('cache-control', 'no-store');
+    if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST 요청만 받아요' });
+    if (!sameOrigin(req)) return res.status(403).json({ ok: false, error: '이 사이트에서 보낸 요청만 받아요' });
+
+    let payload;
+    try {
+      payload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+    } catch {
+      return res.status(400).json({ ok: false, error: '요청 형식이 올바르지 않아요' });
+    }
+    if (JSON.stringify(payload).length > MAX_BODY) return res.status(413).json({ ok: false, error: '요청이 너무 커요' });
+
+    const plan = cleanPlan(payload.plan);
+    const cacheKey = `${name}:${JSON.stringify(plan)}`;
+    if (cache.has(cacheKey)) return res.status(200).json({ ok: true, data: cache.get(cacheKey), cached: true });
+
+    if (rateLimited(clientIp(req))) {
+      return res.status(429).json({ ok: false, error: '잠시 후 다시 시도해 주세요' });
+    }
+
+    try {
+      const data = validate(await callOpenAI({ name, system, user: buildUser(plan), schema }));
+      remember(cacheKey, data);
+      return res.status(200).json({ ok: true, data });
+    } catch (e) {
+      // 키나 요청 내용은 남기지 않고, 실패 종류만 기록해요
+      const kind = e && e.name === 'AbortError' ? 'TIMEOUT' : String((e && e.message) || 'ERROR').slice(0, 40);
+      console.error(`[${name}] AI 호출 실패: ${kind}`);
+      return res.status(502).json({ ok: false, error: 'AI 응답을 받지 못했어요' });
+    }
+  };
+}
+
+module.exports = { MODEL, STR, obj, clip, planText, makeHandler };
