@@ -8,7 +8,7 @@
  */
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
-const MODEL = process.env.OPENAI_MODEL || 'gpt-5-mini';
+const MODEL = process.env.OPENAI_MODEL || 'gpt-5.4-mini';
 const AI_TIMEOUT_MS = 25000; // 25초 안에 답이 없으면 포기 → 화면은 예시 데이터로 넘어감 (vercel.json 최대 30초보다 짧게)
 const MAX_BODY = 8000; // 브라우저에서 받는 요청 크기 제한
 
@@ -159,7 +159,7 @@ function clientIp(req) {
   return String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || String(req.headers['x-real-ip'] || '') || 'unknown';
 }
 
-function makeHandler({ name, system, schema, buildUser, validate }) {
+function makeHandler({ name, system, schema, buildUser, validate, clean }) {
   return async (req, res) => {
     res.setHeader('cache-control', 'no-store');
     if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST 요청만 받아요', reason: 'METHOD' });
@@ -174,7 +174,8 @@ function makeHandler({ name, system, schema, buildUser, validate }) {
     if (JSON.stringify(payload).length > MAX_BODY) return res.status(413).json({ ok: false, error: '요청이 너무 커요' });
 
     const plan = cleanPlan(payload.plan);
-    const cacheKey = `${name}:${JSON.stringify(plan)}`;
+    const extra = clean ? clean(payload) : null; // 기획서 외에 함께 받는 내용(예: 회의에서 고른 답)
+    const cacheKey = `${name}:${JSON.stringify(plan)}:${JSON.stringify(extra)}`;
     if (cache.has(cacheKey)) return res.status(200).json({ ok: true, data: cache.get(cacheKey), cached: true });
 
     if (rateLimited(clientIp(req))) {
@@ -182,13 +183,13 @@ function makeHandler({ name, system, schema, buildUser, validate }) {
     }
 
     try {
-      const data = validate(await callOpenAI({ name, system, user: buildUser(plan), schema }));
+      const data = validate(await callOpenAI({ name, system, user: buildUser(plan, extra), schema }));
       remember(cacheKey, data);
       return res.status(200).json({ ok: true, data });
     } catch (e) {
       // 키나 요청 내용은 남기지 않고, 실패 종류만 기록해요
       const msg = String((e && e.message) || '');
-      const kind = e && e.name === 'AbortError' ? 'TIMEOUT' : /^(NO_KEY|UPSTREAM_\d{3}|EMPTY|REFUSAL|TRUNCATED|BAD_JSON|BAD_SHAPE)$/.test(msg) ? msg : 'ERROR';
+      const kind = e && e.name === 'AbortError' ? 'TIMEOUT' : /^(NO_KEY|UPSTREAM_\d{3}|EMPTY|REFUSAL|TRUNCATED|BAD_JSON|BAD_SHAPE|BAD_TONE)$/.test(msg) ? msg : 'ERROR';
       console.error(`[${name}] AI 호출 실패: ${kind}`);
       // 실패 종류 코드만 돌려줘요 (키·요청 내용·OpenAI 원문 오류는 돌려주지 않음)
       return res.status(502).json({ ok: false, error: 'AI 응답을 받지 못했어요', reason: kind });
