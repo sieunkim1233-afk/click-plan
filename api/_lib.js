@@ -15,7 +15,7 @@ const MAX_BODY = 8000; // 브라우저에서 받는 요청 크기 제한
 /* ---------- 호출 제한 ----------
  * 서버 인스턴스 메모리 기준의 간단한 제한이에요(인스턴스가 여러 개면 각자 셉니다).
  * 더 확실하게 막으려면 Vercel Firewall의 Rate Limiting 규칙도 함께 켜 주세요. */
-const LIMIT = { perIpMinute: 5, perIpHour: 30, globalMinute: 60 };
+const LIMIT = { perIpMinute: 30, perIpHour: 300, globalMinute: 60 }; // 같은 와이파이를 쓰는 교실도 고려한 같은 주소 기준 제한
 const ipHits = new Map();
 let globalHits = [];
 
