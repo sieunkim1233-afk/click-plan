@@ -21,6 +21,12 @@ const SCENARIOS = {
     cta: '오늘의 메뉴 보기', card: '메뉴 카드', place: '식당', placeObj: '식당을', pin: '식당 표시(핀)',
     infoItems: '대표 메뉴', emptyDay: '토요일', emptyNote: '토요일에는 학생식당이 쉬어요', firstDay: '월요일',
   },
+  // 내 프로젝트 가져오기: 지시문에는 일반 단어만 쓰고, 학생이 쓴 이름·소개는 기획서 내용으로만 전달
+  custom: {
+    appName: '학생이 직접 가져온 프로젝트 앱', item: '항목', itemSubj: '항목이', nowObj: '지금 가장 중요한 항목을',
+    cta: '주요 기능 보기', card: '목록 카드', place: '장소', placeObj: '장소를', pin: '장소 표시(핀)',
+    infoItems: '상세 내용', emptyDay: '탭 3', emptyNote: '이 탭에는 아직 보여 줄 내용이 없어요', firstDay: '탭 1',
+  },
   studyroom: {
     appName: '도서관 스터디룸 앱', item: '예약 시간', itemSubj: '예약 시간이', nowObj: '지금 바로 쓸 수 있는 방을',
     cta: '지금 빈 방 보기', card: '시간 카드', place: '스터디룸', placeObj: '스터디룸을', pin: '스터디룸 표시(핀)',

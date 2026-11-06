@@ -53,8 +53,12 @@ function cleanPlan(p) {
   const names = [0, 1, 2].map((i) => clip(Array.isArray(plan.screenNames) ? plan.screenNames[i] : '', 20) || DEFAULT_NAMES[i]);
   const screens = [0, 1, 2].map((i) => ({ desc: clip(Array.isArray(plan.screens) && plan.screens[i] ? plan.screens[i].desc : '', 120) }));
   const a = plan.actions && typeof plan.actions === 'object' ? plan.actions : {};
+  const scenario = scenarioWords(clip(plan.scenario, 20)).id; // 서버 목록에 있는 의뢰 id만 사용
+  const pj = plan.project && typeof plan.project === 'object' ? plan.project : {};
   return {
-    scenario: scenarioWords(clip(plan.scenario, 20)).id, // 서버 목록에 있는 의뢰 id만 사용
+    scenario,
+    // 내 프로젝트 가져오기: 학생이 쓴 이름과 한 줄 소개 (기획서 내용으로만 다룸)
+    project: scenario === 'custom' ? { name: clip(pj.name, 40), desc: clip(pj.desc, 160) } : null,
     purpose: clip(plan.purpose),
     target: clip(plan.target),
     screenNames: names,
@@ -67,7 +71,7 @@ function planText(plan) {
   const n = plan.screenNames;
   const w = scenarioWords(plan.scenario);
   return [
-    `의뢰: ${w.appName}`,
+    plan.project ? `의뢰: 학생이 직접 가져온 프로젝트 「${plan.project.name || '이름 없음'}」 — ${plan.project.desc || '(소개 없음)'}` : `의뢰: ${w.appName}`,
     `서비스 목적: ${plan.purpose || '(비어 있음)'}`,
     `대상 사용자: ${plan.target || '(비어 있음)'}`,
     '주요 화면:',
