@@ -7,6 +7,8 @@
  * - 파일 이름이 _ 로 시작하면 Vercel이 주소(함수)로 만들지 않습니다.
  */
 
+const { scenarioWords } = require('./_scenarios');
+
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const MODEL = process.env.OPENAI_MODEL || 'gpt-5.4-mini';
 const AI_TIMEOUT_MS = 25000; // 25초 안에 답이 없으면 포기 → 화면은 예시 데이터로 넘어감 (vercel.json 최대 30초보다 짧게)
@@ -52,6 +54,7 @@ function cleanPlan(p) {
   const screens = [0, 1, 2].map((i) => ({ desc: clip(Array.isArray(plan.screens) && plan.screens[i] ? plan.screens[i].desc : '', 120) }));
   const a = plan.actions && typeof plan.actions === 'object' ? plan.actions : {};
   return {
+    scenario: scenarioWords(clip(plan.scenario, 20)).id, // 서버 목록에 있는 의뢰 id만 사용
     purpose: clip(plan.purpose),
     target: clip(plan.target),
     screenNames: names,
@@ -62,15 +65,17 @@ function cleanPlan(p) {
 
 function planText(plan) {
   const n = plan.screenNames;
+  const w = scenarioWords(plan.scenario);
   return [
+    `의뢰: ${w.appName}`,
     `서비스 목적: ${plan.purpose || '(비어 있음)'}`,
     `대상 사용자: ${plan.target || '(비어 있음)'}`,
     '주요 화면:',
     ...n.map((name, i) => `  ${i + 1}. ${name} — ${plan.screens[i].desc || '(설명 없음)'}`),
     '버튼 동작:',
-    `  - ${n[0]} 화면의 '오늘의 공연 보기' 버튼: ${plan.actions.home || '(비어 있음)'}`,
-    `  - ${n[1]} 화면의 공연 카드: ${plan.actions.schedule || '(비어 있음)'}`,
-    `  - ${n[2]} 화면의 부스 표시(핀): ${plan.actions.map || '(비어 있음)'}`,
+    `  - ${n[0]} 화면의 '${w.cta}' 버튼: ${plan.actions.home || '(비어 있음)'}`,
+    `  - ${n[1]} 화면의 ${w.card}: ${plan.actions.schedule || '(비어 있음)'}`,
+    `  - ${n[2]} 화면의 ${w.pin}: ${plan.actions.map || '(비어 있음)'}`,
   ].join('\n');
 }
 
@@ -183,7 +188,8 @@ function makeHandler({ name, system, schema, buildUser, validate, clean }) {
     }
 
     try {
-      const data = validate(await callOpenAI({ name, system, user: buildUser(plan, extra), schema }));
+      const sys = typeof system === 'function' ? system(scenarioWords(plan.scenario)) : system; // 의뢰에 맞춘 지시문
+      const data = validate(await callOpenAI({ name, system: sys, user: buildUser(plan, extra), schema }));
       remember(cacheKey, data);
       return res.status(200).json({ ok: true, data });
     } catch (e) {
