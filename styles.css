@@ -963,3 +963,22 @@ textarea:focus, input:focus { border-color: var(--navy); background: #fff; }
 @media (max-width: 960px) {
   .report .rp-block > :not(h4) { grid-column: auto; }
 }
+
+/* ---------- 의뢰 고르기 ---------- */
+.scn-pick { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 32px; }
+.scn {
+  display: flex; align-items: flex-start; gap: 12px; min-width: 0; padding: 16px;
+  text-align: left; color: var(--text); background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--shadow);
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.scn:hover { border-color: var(--border-strong); }
+.scn .avatar { flex: none; }
+.scn-txt { display: grid; gap: 4px; min-width: 0; }
+.scn-txt b { font-size: var(--t3); line-height: 26px; font-weight: 800; }
+.scn-txt small { font-size: 15px; line-height: 22px; color: var(--text-2); }
+.scn.on { background: var(--navy); border-color: var(--navy); color: #fdf8ee; }
+.scn.on small { color: #e6dfd0; }
+.scn.on .avatar { background: #fdf8ee !important; color: var(--navy); }
+@media (max-width: 1080px) { .scn-pick { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .scn-pick { grid-template-columns: 1fr; gap: 8px; margin-bottom: 24px; } }

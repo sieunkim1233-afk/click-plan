@@ -133,6 +133,7 @@
   // AI에게 보낼 기획서 (학생이 쓴 내용만)
   function planForAI(plan) {
     return {
+      scenario: state.scenario, // 서버는 이 id로 미리 저장된 의뢰 단어만 써요
       purpose: plan.purpose,
       target: plan.target,
       screenNames: screenNames(plan),
@@ -250,8 +251,45 @@
   const findQ = (id) => MEET().questions.find((q) => q.id === id);
   const findOpt = (q, id) => q.options.find((o) => o.id === id);
 
+  /* ---------- 의뢰(시나리오) ----------
+   * 의뢰를 고르면 data.js의 틀(회의 질문, 기획서 칸, 리포트 과제)에 그 의뢰의 단어를 채우고,
+   * 의뢰 대화·미리보기 앱 내용·예시 기획서를 그 의뢰 것으로 바꿔요. */
+  const clone = (v) => JSON.parse(JSON.stringify(v));
+  const TEMPLATE = clone({ meeting: D.meeting, planForm: D.planForm, preview: D.preview, report: D.report, result: D.result, team: D.team });
+  const STORY = D.scenarios[0]; // 첫 화면 스크롤 모션은 축제 예시로 고정
+  D.storyApp = STORY.app;
+  D.storyTabs = STORY.form.screens.map((x) => x.defaultName);
+  const W = () => D.festival.words; // 지금 의뢰의 단어 (공연/투어/메뉴…)
+
+  function fillWords(v, w) {
+    if (typeof v === 'string') return v.replace(/\{([a-zA-Z]+)\}/g, (m, k) => (k in w ? w[k] : m));
+    if (Array.isArray(v)) return v.map((x) => fillWords(x, w));
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fillWords(x, w)]));
+    return v;
+  }
+
+  function applyScenario(id) {
+    const sc = D.scenarios.find((x) => x.id === id) || D.scenarios[0];
+    const w = sc.words;
+    D.request = sc.request;
+    D.festival = { ...sc.app, words: w };
+    D.meeting = fillWords(clone(TEMPLATE.meeting), w);
+    D.preview = fillWords(clone(TEMPLATE.preview), w);
+    D.report = fillWords(clone(TEMPLATE.report), w);
+    D.result = fillWords(clone(TEMPLATE.result), w);
+    const pf = fillWords(clone(TEMPLATE.planForm), w);
+    pf.purpose.example = sc.form.purpose;
+    pf.target.example = sc.form.target;
+    pf.screens.slots = pf.screens.slots.map((slot, i) => ({ ...slot, ...sc.form.screens[i] }));
+    pf.actions.items = pf.actions.items.map((it, i) => ({ ...it, example: sc.form.actions[i] }));
+    D.planForm = pf;
+    D.team = { ...TEMPLATE.team, client: { ...TEMPLATE.team.client, ...sc.client } };
+    D.scenario = sc;
+    state.scenario = sc.id;
+  }
+
   /* =========================================================
-   * 휴대폰 미리보기 (축제 앱)
+   * 휴대폰 미리보기 (고른 의뢰의 앱)
    * ========================================================= */
   class Phone {
     constructor(el, opts) {
@@ -307,11 +345,11 @@
           </div>
         </div>
         <div class="a-stats">
-          <div><b>${perfCount}</b><small>공연</small></div>
-          <div><b>${f.booths.length}</b><small>부스</small></div>
+          <div><b>${perfCount}</b><small>${esc(W().item)}</small></div>
+          <div><b>${f.booths.length}</b><small>${esc(W().place)}</small></div>
           <div><b>${f.days.length}일</b><small>기간</small></div>
         </div>
-        <button type="button" class="a-cta" data-act="home">오늘의 공연 보기</button>
+        <button type="button" class="a-cta" data-act="home">${esc(W().cta)}</button>
         <div class="a-section"><h4>이 앱은요</h4><p class="a-muted">${esc(this.plan.purpose || '서비스 목적이 여기에 보여요.')}</p></div>
         <div class="a-section"><h4>공지</h4>${f.notices.map((t) => `<p class="a-notice">${esc(t)}</p>`).join('')}</div>`;
     }
@@ -328,7 +366,7 @@
       if (!day.performances.length) {
         list =
           fx.q2 === 'message'
-            ? `<div class="a-empty"><b>${esc(day.label)}에는 공연이 없어요</b><p>${esc(day.note)}</p><button type="button" class="a-btn" data-day="${days[0].id}">${esc(days[0].label)} 공연 보기</button></div>`
+            ? `<div class="a-empty"><b>${esc(day.label)}에는 ${esc(W().itemSubj)} 없어요</b><p>${esc(day.note)}</p><button type="button" class="a-btn" data-day="${days[0].id}">${esc(days[0].label)} ${esc(W().item)} 보기</button></div>`
             : `<div class="a-blank"></div>`;
       } else {
         const isToday = day.id === D.festival.todayDayId;
@@ -339,7 +377,7 @@
             return `<button type="button" class="a-perf ${now ? 'now' : ''}${pulse}" data-act="schedule" data-id="${pf.id}">
               <span class="a-time">${pf.time}</span>
               <span class="a-perf-info"><b>${esc(pf.title)}</b><small>${esc(pf.stage)}</small></span>
-              ${now ? '<span class="a-live">공연 중</span>' : ''}
+              ${now ? `<span class="a-live">${esc(W().live)}</span>` : ''}
             </button>`;
           })
           .join('');
@@ -359,7 +397,7 @@
           return `<button type="button" class="a-pin${sel}" style="left:${b.x}%;top:${b.y}%" data-act="map" data-id="${b.id}" aria-label="${i + 1}번 ${esc(b.name)}">${i + 1}</button>`;
         })
         .join('');
-      return `<h3 class="a-title">${esc(n[2])}</h3><p class="a-muted a-small">부스 표시를 눌러 보세요</p><div class="a-map">${zones}${pins}</div>
+      return `<h3 class="a-title">${esc(n[2])}</h3><p class="a-muted a-small">${esc(W().pinHint)}</p><div class="a-map">${zones}${pins}</div>
         <div class="a-legend">${f.booths.map((b, i) => `<span><i>${i + 1}</i>${esc(b.name)}</span>`).join('')}</div>`;
     }
 
@@ -377,7 +415,7 @@
 
     boothPage() {
       const b = D.festival.booths.find((x) => x.id === this.s.page);
-      return `<div class="a-pagebar"><button type="button" class="a-back" data-act="back">${icon('chevronLeft')}뒤로</button><span>부스 정보</span></div>
+      return `<div class="a-pagebar"><button type="button" class="a-back" data-act="back">${icon('chevronLeft')}뒤로</button><span>${esc(W().detail)}</span></div>
         <div class="a-detail">${this.boothInfo(b)}<p class="a-muted a-small">지도에서 ${esc(b.place)} 위치를 찾아가세요.</p></div>`;
     }
 
@@ -453,7 +491,7 @@
 
       const act = t.dataset.act;
       if (act === 'home') {
-        const where = `${names[0]} › 오늘의 공연 보기`;
+        const where = `${names[0]} › ${W().cta}`;
         if (fx.q1) {
           this.go(1);
           const days = this.days();
@@ -463,12 +501,12 @@
           const body = $('.app-body', this.el);
           const now = $('.a-perf.now', this.el);
           if (body) body.scrollTop = now ? Math.max(0, now.offsetTop - 80) : 0;
-          this.log('home', where, fx.q1 === 'now' ? '지금 공연 중인 공연이 강조됨' : `${names[1]} 맨 위로 이동`, 'ok');
+          this.log('home', where, fx.q1 === 'now' ? `${W().now} 강조됨` : `${names[1]} 맨 위로 이동`, 'ok');
         } else {
           this.runAction('home', where);
         }
       } else if (act === 'schedule') {
-        this.runAction('schedule', `${names[1]} › 공연 카드`);
+        this.runAction('schedule', `${names[1]} › ${W().card}`);
       } else if (act === 'map') {
         const b = D.festival.booths.find((x) => x.id === t.dataset.id);
         const where = `${names[2]} › ${b.name}`;
@@ -479,7 +517,7 @@
         } else if (fx.q3 === 'page') {
           this.s.page = b.id;
           this.render();
-          this.log('map', where, '부스 상세 화면으로 이동', 'ok');
+          this.log('map', where, `${W().place} 상세 화면으로 이동`, 'ok');
         } else {
           this.runAction('map', where);
         }
@@ -517,6 +555,8 @@
     seenRequest: false,
     seenMeeting: false,
   };
+
+  applyScenario('festival'); // 처음에는 축제 의뢰
 
   const viewEl = $('#view');
   const stepperEl = $('#stepper');
@@ -641,11 +681,11 @@
   function renderStart() {
     const s = D.service;
     const st = s.story;
-    const f = D.festival;
+    const f = D.storyApp; // 첫 화면 모션은 축제 예시로 고정
     const today = f.days.find((d) => d.id === f.todayDayId);
     const perfs = today.performances.slice(0, 2);
     const emptyDay = f.days.find((d) => !d.performances.length);
-    const tabs = D.planForm.screens.slots.map((x) => x.defaultName);
+    const tabs = D.storyTabs;
     const sentence = st.sentence
       .map((part) => {
         const chars = [...part.t].map((c) => `<span class="ch">${esc(c)}</span>`).join('');
@@ -760,7 +800,7 @@
     // 장면 경계 (진행도 기준)
     const CUT = [0.04, 0.18, 0.34, 0.5, 0.68, 0.84];
     let geo = { frags: [], marks: [] };
-    let vertical = false, still = false, lastN = -1, lastCap = -1, raf = 0;
+    let vertical = false, still = false, lastN = -1, lastIntro = -2, lastCap = -1, raf = 0;
 
     function measure() {
       vertical = mqV.matches;
@@ -772,6 +812,7 @@
       caps[0].classList.add('on');
       lastCap = -1;
       lastN = -1;
+      lastIntro = -2;
 
       // 무대를 화면 크기에 맞게 줄이기
       const natW = stage.offsetWidth, natH = stage.offsetHeight;
@@ -817,11 +858,21 @@
         bar.style.width = `${p * 100}%`;
       }
 
+      // 스크롤 전 미리보기: 맨 위에서는 완성된 문장과 앱 화면을 보여 주고, 스크롤을 시작하면 사라진 뒤 장면 1부터 재생
+      const intro = still ? 0 : 1 - seg(p, 0.02, 0.05);
+      const introKey = intro === 0 ? -1 : Math.round(intro * 20);
+
       // 장면 1: 한 글자씩 입력
       const n = still ? chars.length : Math.round(seg(p, 0.04, 0.16) * chars.length);
-      if (n !== lastN) {
-        chars.forEach((c, i) => { c.classList.toggle('on', i < n); c.classList.toggle('caret', i === n - 1 && n < chars.length); });
+      if (n !== lastN || introKey !== lastIntro) {
+        chars.forEach((c, i) => {
+          const typed = i < n;
+          c.classList.toggle('on', typed);
+          c.classList.toggle('caret', typed && i === n - 1 && n < chars.length);
+          c.style.opacity = typed || intro === 0 ? '' : String(intro);
+        });
         lastN = n;
+        lastIntro = introKey;
       }
       doc.style.opacity = still ? 1 : 1 - seg(p, 0.5, 0.56);
 
@@ -840,7 +891,7 @@
       // 장면 3: 버튼과 카드로 조립
       comps.forEach((el) => {
         const i = +el.dataset.o;
-        const o = still ? 1 : ease(seg(p, 0.34 + i * 0.02, 0.42 + i * 0.02));
+        const o = still ? 1 : Math.max(ease(seg(p, 0.34 + i * 0.02, 0.42 + i * 0.02)), intro);
         el.style.opacity = o;
         el.style.transform = vertical || still ? '' : `translateY(${(1 - o) * 8}px)`;
       });
@@ -887,9 +938,18 @@
     const req = await AI.getClientRequest();
     view(`
       <section class="screen">
-        ${head(1, '새 의뢰가 도착했어요', '의뢰인이 무엇을 원하는지 파악해 보세요.')}
+        ${head(1, '새 의뢰가 도착했어요', '맡을 의뢰를 고르고, 의뢰인이 무엇을 원하는지 파악해 보세요.')}
+        <div class="scn-pick" role="radiogroup" aria-label="의뢰 고르기">
+          ${D.scenarios
+            .map(
+              (sc) => `<button type="button" class="scn ${sc.id === state.scenario ? 'on' : ''}" data-scn="${sc.id}" role="radio" aria-checked="${sc.id === state.scenario}">
+                <span class="scn-txt"><b>${esc(sc.words.appName)}</b><small>${esc(sc.client.name)} · ${esc(sc.summary)}</small></span>
+              </button>`
+            )
+            .join('')}
+        </div>
         <div class="two-col">
-          ${room('reqChat', `${esc(D.team.client.avatar)} ${esc(D.team.client.name)}`, '1:1 의뢰 대화')}
+          ${room('reqChat', esc(D.team.client.name), '1:1 의뢰 대화')}
           <aside class="card brief" id="brief">
             <h3>의뢰서 요약</h3>
             <dl>${req.brief.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>
@@ -901,6 +961,17 @@
           </aside>
         </div>
       </section>`);
+    // 의뢰 바꾸기: 이미 쓴 기획서가 있으면 지워도 되는지 먼저 묻기
+    $('.scn-pick').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-scn]');
+      if (!b || b.dataset.scn === state.scenario) return;
+      const p = state.plan;
+      const written = p.purpose || p.target || p.screens.some((x) => x.name || x.desc) || Object.values(p.actions).some(Boolean);
+      if (written && !confirm('의뢰를 바꾸면 지금까지 쓴 기획서와 회의 답변이 지워져요. 바꿀까요?')) return;
+      applyScenario(b.dataset.scn);
+      Object.assign(state, { maxStep: 1, plan: blankPlan(), answers: {}, memos: {}, log: [], missions: {}, seenRequest: false, seenMeeting: false, aiActions: null, aiActionsNote: '', meeting: null, meetingNote: '', meetingPromise: null, report: null });
+      goTo(1);
+    });
     const msgs = req.messages.map((m) => ({ by: 'client', html: m.strong ? `<strong>${esc(m.text)}</strong>` : esc(m.text) }));
     playChat($('#reqChat'), msgs, {
       instant: state.seenRequest,
@@ -983,7 +1054,7 @@
             </div>
             <h3>처음 쓰는 기획서 팁</h3>
             <ul>${F.tips.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
-            <div class="mini-brief"><small>의뢰 한 줄 요약</small><b>대학생용 축제 앱 · 화면 3개</b><span>공연 일정과 부스 위치를 쉽게!</span></div>
+            <div class="mini-brief"><small>의뢰 한 줄 요약</small><b>${esc(W().appName)} · 화면 3개</b><span>${esc(D.scenario.summary)}</span></div>
           </aside>
         </div>
       </section>`);
@@ -1129,7 +1200,7 @@
       <section class="screen">
         ${head(4, 'AI 팀 회의', '팀원들이 기획의 빈틈을 질문해요.')}
         <div class="meeting-layout">
-          ${room('meetChat', '축제 앱 기획팀 <span class="count">3</span>', '디자이너 · 개발자 · 나')}
+          ${room('meetChat', `${esc(W().appShort)} 기획팀 <span class="count">3</span>`, '디자이너 · 개발자 · 나')}
           <aside class="card team">
             <h3>오늘 회의 참석자</h3>
             <ul>
@@ -1215,7 +1286,7 @@
             .join('')}
         </div>
         <label class="memo">내 말로 덧붙이기 <span class="muted">(선택)</span>
-          <textarea name="memo-${q.id}" rows="2" placeholder="예: 공연 시작 10분 전에는 '곧 시작'이라고 표시하기">${esc(state.memos[q.id] || '')}</textarea>
+          <textarea name="memo-${q.id}" rows="2" placeholder="예: 시작 10분 전에는 '곧 시작'이라고 표시하기">${esc(state.memos[q.id] || '')}</textarea>
         </label>
       </article>`;
     };
@@ -1272,7 +1343,7 @@
       if (id === 'q1') phone.show({ screen: 0 });
       if (id === 'q2') phone.show({ screen: 1, day: state.answers.q2 === 'hide' ? 'd1' : 'd3' });
       if (id === 'q3') phone.show({ screen: 2 });
-      const hint = { q1: "'오늘의 공연 보기'를 눌러 보세요", q2: '날짜 탭을 눌러 보세요', q3: '부스를 눌러 보세요' }[id];
+      const hint = { q1: `'${W().cta}'를 눌러 보세요`, q2: '날짜 탭을 눌러 보세요', q3: `${W().placeObj} 눌러 보세요` }[id];
       phone.toast(`반영했어요: ${findOpt(q, e.target.value).label}. ${hint}!`);
       progress();
       if (window.matchMedia('(max-width: 900px)').matches) $('#phone').scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1303,15 +1374,15 @@
       { label: '서비스 목적', before: p.purpose },
       { label: '대상 사용자', before: p.target },
       { label: '주요 화면', before: p.screens.map((s, i) => `${n[i]}${s.desc ? ` – ${s.desc}` : ''}`).join(' / ') },
-      { label: `${n[0]} › '오늘의 공연 보기'`, before: p.actions.home, after: fill(ans('q1').planText) + memo('q1') },
-      { label: `${n[1]} › 공연 카드`, before: p.actions.schedule },
-      { label: `${n[1]} › 공연이 없는 날`, before: '(기획서에 없음)', after: fill(ans('q2').planText) + memo('q2') },
-      { label: `${n[2]} › 부스 표시`, before: p.actions.map, after: fill(ans('q3').planText) + memo('q3') },
+      { label: `${n[0]} › '${W().cta}'`, before: p.actions.home, after: fill(ans('q1').planText) + memo('q1') },
+      { label: `${n[1]} › ${W().card}`, before: p.actions.schedule },
+      { label: `${n[1]} › ${W().itemSubj} 없는 날`, before: '(기획서에 없음)', after: fill(ans('q2').planText) + memo('q2') },
+      { label: `${n[2]} › ${W().pin}`, before: p.actions.map, after: fill(ans('q3').planText) + memo('q3') },
     ];
   }
 
   function planAsText() {
-    const lines = ['[눌러보는 기획서] 대학생용 축제 앱 기획서', ''];
+    const lines = [`[눌러보는 기획서] ${W().appName} 기획서`, ''];
     revisedRows().forEach((r) => lines.push(`■ ${r.label}`, `  ${r.after || r.before}`, ''));
     lines.push('■ AI 팀 회의에서 찾은 빈틈');
     MEET().questions.forEach((q) => lines.push(`  ${q.gapNo}. ${q.gapTitle} – ${q.short}`));
