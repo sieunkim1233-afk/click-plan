@@ -1049,6 +1049,17 @@
       form.dataset.busy = '1';
       btn.disabled = true;
       btn.innerHTML = '<span class="spin" aria-hidden="true"></span>AI 개발자가 기획서를 읽는 중…';
+      if (AI.online !== false) {
+        // 기다리는 동안 안내: 고장이 아니라는 걸 알 수 있게
+        let wait = form.querySelector('.wait-note');
+        if (!wait) {
+          wait = document.createElement('p');
+          wait.className = 'caption ai-note wait-note';
+          wait.setAttribute('role', 'status');
+          btn.closest('.form-actions').after(wait);
+        }
+        wait.textContent = '최대 30초 정도 걸릴 수 있어요. 늦으면 예시로 넘어가요.';
+      }
       const snapshot = JSON.parse(JSON.stringify(p));
       const res = await AI.interpretPlan(snapshot);
       state.aiActions = res.actions;
