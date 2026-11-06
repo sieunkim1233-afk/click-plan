@@ -66,7 +66,7 @@
         const r = await fetch(path, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ plan: planForAI(plan), ...extra }),
+          body: JSON.stringify({ plan: planForAI(plan, path !== '/api/interpret'), ...extra }), // 첨부 자료 글자는 회의·리포트 요청에만
           signal: ctrl.signal,
         });
         const j = await r.json().catch(() => ({}));
@@ -131,10 +131,10 @@
   };
 
   // AI에게 보낼 기획서 (학생이 쓴 내용만)
-  function planForAI(plan) {
+  function planForAI(plan, withDoc = true) {
     return {
       scenario: state.scenario, // 서버는 이 id로 미리 저장된 의뢰 단어만 써요
-      project: state.scenario === 'custom' ? { name: state.custom.name, desc: state.custom.desc } : undefined,
+      project: state.scenario === 'custom' ? { name: state.custom.name, desc: state.custom.desc, doc: withDoc ? state.custom.fileText : '' } : undefined,
       purpose: plan.purpose,
       target: plan.target,
       screenNames: screenNames(plan),
@@ -551,7 +551,7 @@
   ];
 
   const state = {
-    custom: { name: '', desc: '' }, // '내 프로젝트 가져오기'에서 학생이 쓴 이름과 한 줄 소개
+    custom: { name: '', desc: '', fileName: '', fileText: '' }, // '내 프로젝트 가져오기'에서 학생이 쓴 이름·소개와 첨부 파일에서 뽑은 글자
     step: 0,
     maxStep: 0,
     plan: blankPlan(),
@@ -941,6 +941,64 @@
   }
 
   /* ---------- 2. 의뢰 ---------- */
+  /* ---------- 기획 자료 파일 읽기 (PDF·TXT·MD → 글자) ---------- */
+  const DOC_LIMIT = 8000; // AI에 보낼 최대 글자 수
+  const PDFJS = {
+    // PDF 글자 읽기 도구(PDF.js). PDF를 넣을 때만 불러오고, 파일이 바뀌지 않았는지 지문(integrity)으로 확인해요.
+    src: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+    integrity: 'sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e',
+    worker: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
+  };
+  let pdfjsLoading = null;
+  function loadPdfJs() {
+    if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+    if (!pdfjsLoading) {
+      pdfjsLoading = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = PDFJS.src;
+        s.integrity = PDFJS.integrity;
+        s.crossOrigin = 'anonymous';
+        s.onload = () => {
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS.worker;
+          resolve(window.pdfjsLib);
+        };
+        s.onerror = () => {
+          pdfjsLoading = null;
+          reject(new Error('PDF 읽기 도구를 불러오지 못했어요. 인터넷 연결을 확인하거나 TXT로 저장해서 넣어 주세요.'));
+        };
+        document.head.appendChild(s);
+      });
+    }
+    return pdfjsLoading;
+  }
+  async function readPdfText(file) {
+    const lib = await loadPdfJs();
+    // isEvalSupported: false → PDF 안의 코드가 실행되지 않게 막는 안전 설정
+    const pdf = await lib.getDocument({ data: await file.arrayBuffer(), isEvalSupported: false }).promise;
+    let out = '';
+    for (let i = 1; i <= Math.min(pdf.numPages, 30) && out.length < DOC_LIMIT * 1.2; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      out += content.items.map((it) => it.str).join(' ') + '\n';
+    }
+    return out;
+  }
+  async function readProjectFile(file) {
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    if (file.size > 10 * 1024 * 1024) throw new Error('파일이 10MB보다 커요. 더 작은 파일을 넣어 주세요.');
+    let text;
+    // PDF·TXT·MD만 읽어요 (확장자 기준)
+    if (ext === 'pdf') text = await readPdfText(file);
+    else if (ext === 'txt' || ext === 'md') text = await file.text();
+    else throw new Error('PDF, TXT, MD 파일만 넣을 수 있어요. 다른 형식은 PDF나 TXT로 저장해서 넣어 주세요.');
+    text = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!text) throw new Error('파일에서 글자를 찾지 못했어요. 그림(스캔)으로 된 PDF는 읽을 수 없어요.');
+    return { text: text.slice(0, DOC_LIMIT), cut: text.length > DOC_LIMIT };
+  }
+  function fileStatusText(name, len, cut) {
+    return `“${name}”에서 글자 ${len.toLocaleString('ko-KR')}자를 읽었어요.${cut ? ' 앞부분 8,000자만 AI 팀원이 참고해요.' : ' AI 팀원이 회의와 리포트에서 참고해요.'}`;
+  }
+
   /* 내 프로젝트 가져오기: 의뢰 대화 자리에 이름·한 줄 소개 입력 칸 */
   function customRequestHtml() {
     const c = state.custom;
@@ -951,6 +1009,13 @@
         <input id="projName" maxlength="30" placeholder="예: 우리 과 전공책 나눔 앱" value="${esc(c.name)}">
         <label class="f-q" for="projDesc">한 줄 소개</label>
         <textarea id="projDesc" rows="2" maxlength="120" placeholder="예: 선배가 쓰던 전공책을 후배에게 나눠 주는 앱">${esc(c.desc)}</textarea>
+        <label class="f-q" for="projFile">기획 자료 파일 <span class="proj-opt">(선택)</span></label>
+        <div class="proj-file">
+          <input type="file" id="projFile" accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown">
+          <button type="button" class="btn ghost sm" id="projFileClear" ${c.fileName ? '' : 'hidden'}>파일 빼기</button>
+        </div>
+        <p class="proj-file-status" id="projFileStatus" role="status">${c.fileName ? esc(fileStatusText(c.fileName, c.fileText.length, false)) : 'PDF·TXT·MD 파일에서 글자를 읽어 AI 팀원이 참고해요. (최대 10MB, 앞부분 8,000자)'}</p>
+        <p class="proj-privacy">넣은 파일의 글자는 AI 피드백을 위해 AI 서버(OpenAI)로 보내져요. 이름·연락처 같은 개인정보가 든 파일은 넣지 마세요.</p>
         <div class="form-error" id="projError" role="alert" hidden></div>
       </div>
       <aside class="card brief" id="brief">
@@ -959,6 +1024,7 @@
           <div><dt>의뢰인</dt><dd>나 (직접 가져온 프로젝트)</dd></div>
           <div><dt>만들 것</dt><dd id="projBriefName">${esc(c.name || '프로젝트 이름을 적어 주세요')}</dd></div>
           <div><dt>한 줄 소개</dt><dd id="projBriefDesc">${esc(c.desc || '한 줄 소개를 적어 주세요')}</dd></div>
+          <div><dt>첨부 자료</dt><dd id="projBriefFile">${esc(c.fileName || '없음')}</dd></div>
           <div><dt>미리보기</dt><dd>공용 틀 · 화면 3개 (홈·목록·지도)</dd></div>
         </dl>
         <p class="small brief-note">AI 디자이너와 개발자가 <b>내 기획서</b>를 읽고 빈틈을 질문해요.</p>
@@ -981,6 +1047,38 @@
     };
     name.addEventListener('input', sync);
     desc.addEventListener('input', sync);
+
+    // 기획 자료 파일: 글자만 뽑아 두었다가 AI 회의·리포트에 함께 보내요
+    const fileInput = $('#projFile');
+    const status = $('#projFileStatus');
+    const clearBtn = $('#projFileClear');
+    const setFile = (fileName, fileText) => {
+      state.custom.fileName = fileName;
+      state.custom.fileText = fileText;
+      state.meeting = null; // 자료가 바뀌면 회의·리포트를 다시 받아요
+      state.report = null;
+      $('#projBriefFile').textContent = fileName || '없음';
+      clearBtn.hidden = !fileName;
+    };
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+      status.innerHTML = '<span class="spin" aria-hidden="true"></span>파일에서 글자를 읽는 중…';
+      try {
+        const r = await readProjectFile(file);
+        setFile(file.name, r.text);
+        status.textContent = fileStatusText(file.name, r.text.length, r.cut);
+      } catch (e) {
+        setFile('', '');
+        fileInput.value = '';
+        status.textContent = (e && e.message) || '파일을 읽지 못했어요.';
+      }
+    });
+    clearBtn.addEventListener('click', () => {
+      setFile('', '');
+      fileInput.value = '';
+      status.textContent = '파일을 뺐어요. 필요하면 다시 넣어 주세요.';
+    });
     $('#acceptCustom').addEventListener('click', () => {
       sync();
       if (!state.custom.name) {

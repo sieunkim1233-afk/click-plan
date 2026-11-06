@@ -992,3 +992,18 @@ textarea:focus, input:focus { border-color: var(--navy); background: #fff; }
 .proj-help { margin-bottom: 8px; color: var(--text-2); }
 .proj-form .f-q { margin: 8px 0 0; font-weight: 700; }
 @media (max-width: 640px) { .scn-pick { grid-template-columns: 1fr; } }
+
+/* ---------- 내 프로젝트: 기획 자료 파일 ---------- */
+.proj-opt { font-weight: 400; color: var(--text-2); }
+.proj-file { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.proj-file input[type="file"] {
+  flex: 1 1 240px; min-width: 0; max-width: 100%; padding: 8px 12px;
+  background: var(--surface); border: 1px dashed var(--border-strong); border-radius: var(--r-sm);
+  font-size: 15px; color: var(--text);
+}
+.proj-file input[type="file"]::file-selector-button {
+  margin-right: 12px; padding: 6px 14px; font: inherit; font-weight: 700;
+  color: var(--surface); background: var(--navy); border: 0; border-radius: 6px; cursor: pointer;
+}
+.proj-file-status { display: flex; align-items: center; gap: 8px; font-size: 15px; line-height: 24px; color: var(--text-2); }
+.proj-privacy { font-size: 14px; line-height: 22px; color: var(--text-2); }
