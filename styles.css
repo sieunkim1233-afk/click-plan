@@ -982,3 +982,13 @@ textarea:focus, input:focus { border-color: var(--navy); background: #fff; }
 .scn.on .avatar { background: #fdf8ee !important; color: var(--navy); }
 @media (max-width: 1080px) { .scn-pick { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .scn-pick { grid-template-columns: 1fr; gap: 8px; margin-bottom: 24px; } }
+
+/* ---------- 내 프로젝트 가져오기 ---------- */
+.scn-pick { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.scn.custom { border-style: dashed; border-color: var(--border-strong); }
+.scn.custom.on { border-style: solid; }
+.proj-form { display: grid; gap: 8px; align-content: start; }
+.proj-form h3 { margin-bottom: 0; }
+.proj-help { margin-bottom: 8px; color: var(--text-2); }
+.proj-form .f-q { margin: 8px 0 0; font-weight: 700; }
+@media (max-width: 640px) { .scn-pick { grid-template-columns: 1fr; } }

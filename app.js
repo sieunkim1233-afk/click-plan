@@ -134,6 +134,7 @@
   function planForAI(plan) {
     return {
       scenario: state.scenario, // 서버는 이 id로 미리 저장된 의뢰 단어만 써요
+      project: state.scenario === 'custom' ? { name: state.custom.name, desc: state.custom.desc } : undefined,
       purpose: plan.purpose,
       target: plan.target,
       screenNames: screenNames(plan),
@@ -269,7 +270,12 @@
   }
 
   function applyScenario(id) {
-    const sc = D.scenarios.find((x) => x.id === id) || D.scenarios[0];
+    let sc = D.scenarios.find((x) => x.id === id) || D.scenarios[0];
+    if (sc.custom) {
+      // 내 프로젝트 가져오기: 학생이 쓴 이름과 소개로 앱 이름·요약을 채워요
+      const name = state.custom.name || sc.words.appName;
+      sc = { ...sc, summary: state.custom.desc || sc.summary, words: { ...sc.words, appName: name }, app: { ...sc.app, title: name } };
+    }
     const w = sc.words;
     D.request = sc.request;
     D.festival = { ...sc.app, words: w };
@@ -545,6 +551,7 @@
   ];
 
   const state = {
+    custom: { name: '', desc: '' }, // '내 프로젝트 가져오기'에서 학생이 쓴 이름과 한 줄 소개
     step: 0,
     maxStep: 0,
     plan: blankPlan(),
@@ -934,6 +941,62 @@
   }
 
   /* ---------- 2. 의뢰 ---------- */
+  /* 내 프로젝트 가져오기: 의뢰 대화 자리에 이름·한 줄 소개 입력 칸 */
+  function customRequestHtml() {
+    const c = state.custom;
+    return `<div class="card proj-form">
+        <h3>내 프로젝트 가져오기</h3>
+        <p class="proj-help">직접 기획한 앱의 이름과 한 줄 소개를 적어 주세요. 다음 단계에서 기획서를 쓰면, 공용 미리보기 틀(홈·목록·지도)로 간단히 보여 드리고 AI 팀원이 그 내용으로 빈틈을 질문해요.</p>
+        <label class="f-q" for="projName">프로젝트 이름</label>
+        <input id="projName" maxlength="30" placeholder="예: 우리 과 전공책 나눔 앱" value="${esc(c.name)}">
+        <label class="f-q" for="projDesc">한 줄 소개</label>
+        <textarea id="projDesc" rows="2" maxlength="120" placeholder="예: 선배가 쓰던 전공책을 후배에게 나눠 주는 앱">${esc(c.desc)}</textarea>
+        <div class="form-error" id="projError" role="alert" hidden></div>
+      </div>
+      <aside class="card brief" id="brief">
+        <h3>의뢰서 요약</h3>
+        <dl>
+          <div><dt>의뢰인</dt><dd>나 (직접 가져온 프로젝트)</dd></div>
+          <div><dt>만들 것</dt><dd id="projBriefName">${esc(c.name || '프로젝트 이름을 적어 주세요')}</dd></div>
+          <div><dt>한 줄 소개</dt><dd id="projBriefDesc">${esc(c.desc || '한 줄 소개를 적어 주세요')}</dd></div>
+          <div><dt>미리보기</dt><dd>공용 틀 · 화면 3개 (홈·목록·지도)</dd></div>
+        </dl>
+        <p class="small brief-note">AI 디자이너와 개발자가 <b>내 기획서</b>를 읽고 빈틈을 질문해요.</p>
+        <div class="brief-actions">
+          <button type="button" class="btn ghost" data-go="0">${icon('arrowLeft')}처음으로</button>
+          <button type="button" class="btn primary" id="acceptCustom">이 프로젝트로 기획서 쓰기 ${icon('arrowRight')}</button>
+        </div>
+      </aside>`;
+  }
+
+  function bindCustomRequest() {
+    const name = $('#projName');
+    const desc = $('#projDesc');
+    const sync = () => {
+      state.custom.name = name.value.trim();
+      state.custom.desc = desc.value.trim();
+      $('#projBriefName').textContent = state.custom.name || '프로젝트 이름을 적어 주세요';
+      $('#projBriefDesc').textContent = state.custom.desc || '한 줄 소개를 적어 주세요';
+      $('#projError').hidden = true;
+    };
+    name.addEventListener('input', sync);
+    desc.addEventListener('input', sync);
+    $('#acceptCustom').addEventListener('click', () => {
+      sync();
+      if (!state.custom.name) {
+        const err = $('#projError');
+        err.hidden = false;
+        err.textContent = '프로젝트 이름을 적어 주세요.';
+        name.focus();
+        return;
+      }
+      applyScenario('custom'); // 쓴 이름으로 앱 이름·회의 문구를 다시 채우기
+      if (!state.plan.purpose && state.custom.desc) state.plan.purpose = state.custom.desc; // 소개를 서비스 목적 칸에 미리 넣기
+      state.seenRequest = true;
+      goTo(2);
+    });
+  }
+
   async function renderRequest() {
     const req = await AI.getClientRequest();
     view(`
@@ -942,14 +1005,14 @@
         <div class="scn-pick" role="radiogroup" aria-label="의뢰 고르기">
           ${D.scenarios
             .map(
-              (sc) => `<button type="button" class="scn ${sc.id === state.scenario ? 'on' : ''}" data-scn="${sc.id}" role="radio" aria-checked="${sc.id === state.scenario}">
-                <span class="scn-txt"><b>${esc(sc.words.appName)}</b><small>${esc(sc.client.name)} · ${esc(sc.summary)}</small></span>
+              (sc) => `<button type="button" class="scn ${sc.custom ? 'custom' : ''} ${sc.id === state.scenario ? 'on' : ''}" data-scn="${sc.id}" role="radio" aria-checked="${sc.id === state.scenario}">
+                <span class="scn-txt"><b>${esc(sc.pickTitle || sc.words.appName)}</b><small>${esc(sc.client.name)} · ${esc(sc.summary)}</small></span>
               </button>`
             )
             .join('')}
         </div>
         <div class="two-col">
-          ${room('reqChat', esc(D.team.client.name), '1:1 의뢰 대화')}
+          ${D.scenario.custom ? customRequestHtml() : `${room('reqChat', esc(D.team.client.name), '1:1 의뢰 대화')}
           <aside class="card brief" id="brief">
             <h3>의뢰서 요약</h3>
             <dl>${req.brief.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>
@@ -958,7 +1021,7 @@
               <button type="button" class="btn ghost" data-go="0">${icon('arrowLeft')}처음으로</button>
               <button type="button" class="btn primary" data-go="2">의뢰 수락하고 기획서 쓰기 ${icon('arrowRight')}</button>
             </div>
-          </aside>
+          </aside>`}
         </div>
       </section>`);
     // 의뢰 바꾸기: 이미 쓴 기획서가 있으면 지워도 되는지 먼저 묻기
@@ -972,6 +1035,7 @@
       Object.assign(state, { maxStep: 1, plan: blankPlan(), answers: {}, memos: {}, log: [], missions: {}, seenRequest: false, seenMeeting: false, aiActions: null, aiActionsNote: '', meeting: null, meetingNote: '', meetingPromise: null, report: null });
       goTo(1);
     });
+    if (D.scenario.custom) return bindCustomRequest();
     const msgs = req.messages.map((m) => ({ by: 'client', html: m.strong ? `<strong>${esc(m.text)}</strong>` : esc(m.text) }));
     playChat($('#reqChat'), msgs, {
       instant: state.seenRequest,

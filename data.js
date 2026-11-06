@@ -392,6 +392,76 @@ window.PLAN_DATA = {
         ],
       },
     },
+    {
+      // 내 프로젝트 가져오기: 학생이 이름·한 줄 소개를 직접 쓰고, 공용 틀(홈·목록·지도)로 간단히 미리 봐요
+      id: 'custom',
+      custom: true,
+      pickTitle: '내 프로젝트 가져오기',
+      summary: '내가 기획한 앱으로 체험해요',
+      client: { name: '직접 기획한 앱', avatar: '나' },
+      words: {
+        appName: '내 프로젝트', appShort: '내 프로젝트',
+        item: '항목', itemSubj: '항목이', now: '지금 가장 중요한 항목', nowObj: '지금 가장 중요한 항목을', live: '추천',
+        cta: '주요 기능 보기', card: '목록 카드',
+        place: '장소', placeObj: '장소를', pin: '장소 표시(핀)', pinHint: '장소 표시를 눌러 보세요', detail: '상세 정보', infoItems: '상세 내용',
+        emptyDay: '탭 3', emptyNote: '이 탭에는 아직 보여 줄 내용이 없어요', firstDay: '탭 1',
+        persona: '이 앱을 처음 쓰는 사용자', emptyCase: '보여 줄 내용이 없을 때', targetHint: '이 앱을 쓸 사람',
+        names: '홈·목록·지도',
+      },
+      request: { messages: [], brief: [] },
+      form: {
+        purpose: '사용자가 필요한 정보를 빠르게 찾을 수 있게 한다.',
+        target: '이 앱을 처음 써 보는 대학생',
+        screens: [
+          { defaultName: '홈', example: '주요 기능 바로가기' },
+          { defaultName: '목록', example: '탭별 항목 목록' },
+          { defaultName: '지도', example: '관련 장소 위치' },
+        ],
+        actions: ['주요 기능을 보여 준다.', '자세한 정보를 볼 수 있다.', '장소 정보가 나온다.'],
+      },
+      app: {
+        name: '내 프로젝트',
+        title: '내 프로젝트',
+        period: '공용 틀 미리보기',
+        place: '홈 · 목록 · 지도로 간단히 보여 줘요',
+        todayDayId: 'd1',
+        nowPlayingId: 'p2',
+        notices: ['내가 쓴 기획서로 만든 간단한 미리보기예요.', '실제로 만들 앱과 모양은 다를 수 있어요.'],
+        days: [
+          {
+            id: 'd1', label: '탭 1', date: '목록',
+            performances: [
+              { id: 'p1', time: '#1', title: '예시 항목 A', stage: '예시 설명' },
+              { id: 'p2', time: '#2', title: '예시 항목 B', stage: '예시 설명' },
+              { id: 'p3', time: '#3', title: '예시 항목 C', stage: '예시 설명' },
+            ],
+          },
+          {
+            id: 'd2', label: '탭 2', date: '목록',
+            performances: [
+              { id: 'p4', time: '#1', title: '예시 항목 D', stage: '예시 설명' },
+              { id: 'p5', time: '#2', title: '예시 항목 E', stage: '예시 설명' },
+              { id: 'p6', time: '#3', title: '예시 항목 F', stage: '예시 설명' },
+            ],
+          },
+          { id: 'd3', label: '탭 3', date: '비어 있음', note: '이 탭에는 아직 보여 줄 내용이 없어요.', performances: [] },
+        ],
+        zones: [
+          { name: '구역 A', x: 4, y: 6, w: 56, h: 46 },
+          { name: '구역 B', x: 64, y: 6, w: 32, h: 40 },
+          { name: '구역 C', x: 4, y: 60, w: 40, h: 34 },
+          { name: '구역 D', x: 50, y: 56, w: 46, h: 38 },
+        ],
+        booths: [
+          { id: 'b1', name: '예시 장소 1', category: '예시', x: 22, y: 30, place: '구역 A', hours: '언제나', items: ['예시 정보'] },
+          { id: 'b2', name: '예시 장소 2', category: '예시', x: 46, y: 36, place: '구역 A', hours: '언제나', items: ['예시 정보'] },
+          { id: 'b3', name: '예시 장소 3', category: '예시', x: 80, y: 24, place: '구역 B', hours: '언제나', items: ['예시 정보'] },
+          { id: 'b4', name: '예시 장소 4', category: '예시', x: 24, y: 80, place: '구역 C', hours: '언제나', items: ['예시 정보'] },
+          { id: 'b5', name: '예시 장소 5', category: '예시', x: 64, y: 72, place: '구역 D', hours: '언제나', items: ['예시 정보'] },
+          { id: 'b6', name: '예시 장소 6', category: '예시', x: 86, y: 84, place: '구역 D', hours: '언제나', items: ['예시 정보'] },
+        ],
+      },
+    },
   ],
 
   /* 기획서 작성 화면 (예시 문장·기본 화면 이름은 고른 의뢰의 form 값으로 채워져요) */
