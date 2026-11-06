@@ -1007,3 +1007,6 @@ textarea:focus, input:focus { border-color: var(--navy); background: #fff; }
 }
 .proj-file-status { display: flex; align-items: center; gap: 8px; font-size: 15px; line-height: 24px; color: var(--text-2); }
 .proj-privacy { font-size: 14px; line-height: 22px; color: var(--text-2); }
+
+/* 내 프로젝트 가져오기: 이번 버전에서는 비활성화 (다음 버전에서 제공 예정) */
+.scn.soon, .scn.soon:hover { cursor: not-allowed; opacity: .6; box-shadow: none; border-color: var(--border-strong); }

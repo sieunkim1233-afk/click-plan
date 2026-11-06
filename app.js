@@ -1103,7 +1103,10 @@
         <div class="scn-pick" role="radiogroup" aria-label="의뢰 고르기">
           ${D.scenarios
             .map(
-              (sc) => `<button type="button" class="scn ${sc.custom ? 'custom' : ''} ${sc.id === state.scenario ? 'on' : ''}" data-scn="${sc.id}" role="radio" aria-checked="${sc.id === state.scenario}">
+              (sc) => sc.custom
+                ? `<button type="button" class="scn custom soon" disabled aria-disabled="true">
+                <span class="scn-txt"><b>${esc(sc.pickTitle)}</b><small>다음 버전에서 제공 예정</small></span>`
+                : `<button type="button" class="scn ${sc.id === state.scenario ? 'on' : ''}" data-scn="${sc.id}" role="radio" aria-checked="${sc.id === state.scenario}">
                 <span class="scn-txt"><b>${esc(sc.pickTitle || sc.words.appName)}</b><small>${esc(sc.client.name)} · ${esc(sc.summary)}</small></span>
               </button>`
             )
